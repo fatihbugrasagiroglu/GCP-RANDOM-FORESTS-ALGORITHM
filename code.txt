@@ -1,0 +1,139 @@
+val """"""""""fraudDf = df.filter("Class=1.0")
+
+val nonFraudDf = df.filter("Class=0.0")
+
+val sampleRatio = fraudDf.count().toDouble / df.count().toDouble
+val nonFraudSampleDf = nonFraudDf.sample(false, sampleRatio)
+
+fraudDf.unionAll(nonFraudSampleDf)
+
+val amountVectorAssembler = new VectorAssembler().setInputCols(Array("Amount")).setOutputCol("Amount_vector")
+val standarScaler = new StandardScaler().setInputCol("Amount_vector").setOutputCol("Amount_scaled")
+val dropColumns = Array("Time","Amount","Class")
+
+val cols = df.columns.filter( column => !dropColumns.contains(column)) ++ Array("Amount_scaled")
+val vectorAssembler = new VectorAssembler().setInputCols(cols).setOutputCol("features")
+
+// pipeline
+val logisticRegression = new LogisticRegression().setLabelCol("Class")
+val trainPipeline = new Pipeline().setStages(Array(amountVectorAssembler,
+standarScaler,vectorAssembler,logisticRegression))
+
+val underSampledDf = underSampleDf(df)
+println("for balanced data")
+val balancedModel = runPipeline(trainPipeline, underSampledDf)""""""""""
+
+!!!!!!!!!!!!!
+I tried this code to balanced the data but could not thats why ı wrote below code:
+!!!!!!!!!!!!!
+
+
+
+
+
+
+hadoop fs -copyFromLocal COVID19_cases.csv /BigData/Spark/.
+
+
+val covid19 = spark
+   .read.format("csv")
+   .option("header","true")
+   .load("hdfs://10.128.0.5/BigData/Spark/COVID19_cases.csv")
+
+
+
+
+
+val balanced = covid19.filter(col("Outcome") =!= "ACTIVE")
+
+
+
+
+
+val selected = balanced.select(
+ col("_id").alias("id"),
+ col("Outbreak Associated").alias("Outbreak"),
+ col("Age Group"),
+ col("Source of Infection"),
+ col("Classification"),
+ col("Client Gender").alias("Gender"),
+ col("Outcome"),
+ col("Ever Hospitalized").alias("Hospitalized"),
+ col("Ever Intubated").alias("Intubated"))
+
+
+val Array(trainingData, testData) = selected.randomSplit(Array(0.8, 0.2), 967)
+
+
+
+val inputColumns = Array("Outbreak","Age Group","Source of Infection","Classification","Gender","Outcome","Hospitalized","Intubated")
+val outputColumns = Array("Outbreak_indexed","Age Group_indexed","Source of Infection_indexed","Classification_indexed","Gender_indexed","Outcome_indexed","Hospitalized_indexed","Intubated_indexed" )
+val indexer = new StringIndexer()
+ .setInputCols(inputColumns)
+ .setOutputCols(outputColumns)
+ .setHandleInvalid("skip")
+
+
+
+val assembler = new VectorAssembler()
+.setInputCols(Array("Outbreak_indexed", "Age Group_indexed", "Source of Infection_indexed","Classification_indexed","Gender_indexed","Hospitalized_indexed","Intubated_indexed"))
+.setOutputCol("assembled-features")
+
+
+val rf = new RandomForestClassifier()
+.setFeaturesCol("assembled-features")
+.setLabelCol("Outcome_indexed")
+.setSeed(1111)
+
+
+val pipeline = new Pipeline()
+.setStages(Array(indexer, assembler, rf))
+
+
+val evaluator = new MulticlassClassificationEvaluator()
+.setLabelCol("Outcome_indexed")
+.setPredictionCol("prediction")
+.setMetricName("accuracy")
+
+
+val paramGrid = new ParamGridBuilder()
+.addGrid(rf.maxDepth, Array(2, 4))
+.addGrid(rf.impurity, Array("entropy","gini")).build()
+
+
+
+val cross_validator = new CrossValidator()
+.setEstimator(pipeline)
+.setEvaluator(evaluator)
+.setEstimatorParamMaps(paramGrid)
+.setNumFolds(3)
+
+
+
+
+val cvModel = cross_validator.fit(trainingData)
+
+
+
+val predictions = cvModel.transform(testData)
+
+
+
+val accuracy = evaluator.evaluate(predictions)
+println("accuracy on test data = " + accuracy)
+
+
+
+predictions.select(col("Outbreak"),col("Age Group"),col("Source of Infection"),col("Classification"),col("Gender"),col("Outcome"),col("Outcome_indexed"),col("Hospitalized"),col("Intubated"),col("prediction"))
+.write
+.format("csv")
+.save("hdfs://10.128.0.5/BigData/Spark/COVID19outcome_change")
+
+
+
+
+
+/home/g200469929/COVID19outcome_change/part-00001-2ff5a201-dceb-4a6a-bb45-0239545536f1-c000.csv
+
+
+/home/g200469929/COVID19outcome_change/part-00000-2ff5a201-dceb-4a6a-bb45-0239545536f1-c000.csv
